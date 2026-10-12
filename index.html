@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SIP-телефон</title>
+<style>
+  :root {
+    --bg: #10141c; --card: #1a2130; --border: #2b3547; --text: #e8edf5;
+    --muted: #8b97ab; --accent: #4f8cff; --ok: #3fbf7f; --warn: #e0a63d; --err: #e05c5c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px; background: var(--bg); color: var(--text);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; justify-content: center;
+  }
+  .phone { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 16px; }
+  h1 { font-size: 20px; margin: 0; text-align: center; }
+  h1 small { display:block; font-size: 12px; color: var(--muted); font-weight: normal; margin-top: 4px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .card h2 { margin: 0 0 12px; font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+  input {
+    width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font-size: 15px;
+  }
+  input:focus { outline: none; border-color: var(--accent); }
+  .row { display: flex; gap: 10px; margin-top: 14px; }
+  button {
+    flex: 1; padding: 11px 10px; border: none; border-radius: 8px; font-size: 15px;
+    cursor: pointer; background: var(--accent); color: #fff;
+  }
+  button:disabled { background: var(--border); color: var(--muted); cursor: default; }
+  button.danger { background: var(--err); }
+  button.good { background: var(--ok); }
+  button.neutral { background: #3a465c; }
+  .status { display: flex; align-items: center; gap: 8px; font-size: 15px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.ok { background: var(--ok); } .dot.err { background: var(--err); }
+  .dot.warn { background: var(--warn); animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .2; } }
+  .muted { color: var(--muted); font-size: 13px; margin-top: 6px; word-break: break-word; }
+  .callline { font-size: 17px; margin: 4px 0 2px; }
+  .duration { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .toast { min-height: 18px; font-size: 13px; color: var(--err); margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="phone">
+  <h1>SIP-телефон<small>сигнализация без медиа</small></h1>
+
+  <div class="card">
+    <h2>Статус</h2>
+    <div class="status"><span class="dot" id="regDot"></span><span id="regText">не зарегистрирован</span></div>
+    <div class="muted" id="regInfo"></div>
+    <div class="callline" id="callText"></div>
+    <div class="duration" id="callDuration"></div>
+    <div class="row">
+      <button id="btnAnswer" class="good" style="display:none">Ответить</button>
+      <button id="btnDecline" class="danger" style="display:none">Отклонить</button>
+      <button id="btnCancel" class="danger" style="display:none">Отменить вызов</button>
+      <button id="btnHangup" class="danger" style="display:none">Положить трубку</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Вызов</h2>
+    <label for="callee">Номер</label>
+    <input id="callee" type="text" placeholder="например 101" autocomplete="off">
+    <div class="row">
+      <button id="btnCall">Позвонить</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Регистрация</h2>
+    <label for="server">Адрес SIP-сервера</label>
+    <input id="server" type="text" placeholder="sip.example.ru или 192.168.1.10:5060" autocomplete="off">
+    <label for="number">Номер (SIP-пользователь)</label>
+    <input id="number" type="text" placeholder="101" autocomplete="off">
+    <label for="password">Пароль</label>
+    <input id="password" type="password" autocomplete="off">
+    <div class="row">
+      <button id="btnRegister">Зарегистрировать</button>
+      <button id="btnUnregister" class="neutral">Снять с регистрации</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const REG_TEXT = {
+  none: "не зарегистрирован", registering: "регистрация…",
+  registered: "зарегистрирован", failed: "ошибка регистрации",
+};
+const CALL_TEXT = {
+  outgoing: "Вызов…", ringing: "Гудки…", incoming: "Входящий вызов",
+  active: "Разговор", canceling: "Отмена вызова…", ending: "Завершение…",
+};
+
+let status = { registration: "none", call: "idle" };
+
+function toast(msg) {
+  const el = $("toast");
+  el.textContent = msg || "";
+  if (msg) setTimeout(() => { if (el.textContent === msg) el.textContent = ""; }, 5000);
+}
+
+async function api(path, body) {
+  const res = await fetch(path, {
+    method: body ? "POST" : "GET",
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+  return data;
+}
+
+function render() {
+  const s = status;
+  const dot = $("regDot");
+  dot.className = "dot " + (s.registration === "registered" ? "ok"
+    : s.registration === "failed" ? "err"
+    : s.registration === "registering" ? "warn" : "");
+  $("regText").textContent = REG_TEXT[s.registration] || s.registration;
+  $("regInfo").textContent = (s.server ? s.server + " / " + s.number : "") +
+    (s.reg_error ? " — " + s.reg_error : "");
+
+  const callActive = s.call !== "idle";
+  $("callText").textContent = callActive
+    ? CALL_TEXT[s.call] + (s.call_remote ? ": " + s.call_remote : "")
+    : "";
+
+  const inIncoming = s.call === "incoming";
+  const inOutgoing = ["outgoing", "ringing", "canceling"].includes(s.call);
+  const inConversation = s.call === "active";
+  $("btnAnswer").style.display = inIncoming ? "" : "none";
+  $("btnDecline").style.display = inIncoming ? "" : "none";
+  $("btnCancel").style.display = inOutgoing ? "" : "none";
+  $("btnHangup").style.display = inConversation ? "" : "none";
+
+  $("btnCall").disabled = s.registration !== "registered" || callActive;
+  $("btnRegister").disabled = s.registration === "registering";
+  $("btnUnregister").disabled = s.registration === "none";
+}
+
+function renderDuration() {
+  const el = $("callDuration");
+  if (status.call !== "active" || !status.call_started) { el.textContent = ""; return; }
+  const start = Date.parse(status.call_started);
+  if (isNaN(start)) { el.textContent = ""; return; }
+  let sec = Math.floor((Date.now() - start) / 1000);
+  const mm = String(Math.floor(sec / 60)).padStart(2, "0");
+  const ss = String(sec % 60).padStart(2, "0");
+  el.textContent = mm + ":" + ss;
+}
+
+async function poll() {
+  try { status = await api("/api/status"); } catch (e) { /* server restarting */ }
+  render();
+}
+
+async function action(path, body, okMsg) {
+  try {
+    status = await api(path, body);
+    if (okMsg) toast("");
+    render();
+  } catch (e) { toast(e.message); }
+}
+
+$("btnRegister").onclick = () => action("/api/register", {
+  server: $("server").value.trim(),
+  number: $("number").value.trim(),
+  password: $("password").value,
+});
+$("btnUnregister").onclick = () => {
+  if (status.call !== "idle") { toast("Сначала завершите вызов"); return; }
+  action("/api/unregister", {});
+};
+$("btnCall").onclick = () => {
+  const n = $("callee").value.trim();
+  if (!n) { toast("Введите номер"); return; }
+  action("/api/call", { number: n });
+};
+$("btnCancel").onclick    = () => action("/api/cancel", {});
+$("btnAnswer").onclick    = () => action("/api/answer", {});
+$("btnDecline").onclick   = () => action("/api/decline", {});
+$("btnHangup").onclick    = () => action("/api/hangup", {});
+$("callee").addEventListener("keydown", e => { if (e.key === "Enter") $("btnCall").click(); });
+
+setInterval(poll, 800);
+setInterval(renderDuration, 1000);
+poll();
+</script>
+</body>
+</html>

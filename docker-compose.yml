@@ -1,0 +1,20 @@
+services:
+  sipphone:
+    build: .
+    container_name: sipphone
+    # Host networking: the container binds host ports directly.
+    #   - UDP 5060 for SIP signaling (needed for incoming calls),
+    #   - TCP 8212 for the web UI.
+    # This also avoids NAT problems: Via/Contact carry the host IP.
+    network_mode: "host"
+    restart: unless-stopped
+    environment:
+      SIP_DEBUG: ${SIP_DEBUG:-} # SIP_DEBUG=1 docker-compose up — full SIP trace in logs
+
+    # Alternative without host networking (e.g. non-Linux Docker):
+    # uncomment the ports/env below and comment network_mode.
+    # Set SIP_ADVERTISE_IP to the IP the SIP server can reach you at.
+    # ports:
+    #   - "8212:8212"
+    #   - "5060:5060/udp"
+    # command: ["-ip", "${SIP_ADVERTISE_IP:-127.0.0.1}"]
