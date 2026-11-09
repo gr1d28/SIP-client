@@ -10,6 +10,9 @@ services:
     restart: unless-stopped
     environment:
       SIP_DEBUG: ${SIP_DEBUG:-} # SIP_DEBUG=1 docker-compose up — full SIP trace in logs
+    command: ["-sip", "0.0.0.0:5062", "-root", "/project"]
+    volumes:
+      - .:/project:ro # project files for the web file browser (read-only)
 
     # Alternative without host networking (e.g. non-Linux Docker):
     # uncomment the ports/env below and comment network_mode.

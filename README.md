@@ -57,6 +57,7 @@ SIP_DEBUG=1 docker-compose up -d
 | `-web`  | `:8212`         | адрес веб-интерфейса                                              |
 | `-sip`  | `0.0.0.0:5060`  | UDP-адрес SIP-транспорта                                          |
 | `-ip`   | (авто)          | IP в заголовках Via/Contact; по умолчанию определяется по маршруту до SIP-сервера |
+| `-root` | `.`             | каталог, который показывает веб-обозреватель файлов                                |
 
 Если порт 5060 на хосте занят, укажите другой: в `docker-compose.yml`
 раскомментируйте и задайте `command: ["-sip", "0.0.0.0:5062"]`
@@ -69,6 +70,15 @@ SIP_DEBUG=1 docker-compose up -d
 ```bash
 go run .
 ```
+
+## Обозреватель файлов
+
+Под панелью телефона на странице показаны дерево файлов и текстовое превью
+(код/текст; бинарные файлы и файлы больше 512 КиБ не отображаются). Дерево
+показывает каталог `-root` (по умолчанию — рабочий каталог процесса; в Docker
+он примонтирован из корня проекта в `/project` только для чтения). Каталоги
+`.git`, `node_modules`, `__pycache__`, `.venv` скрываются; доступ к путям
+вне `-root` запрещён.
 
 ## Структура проекта
 
@@ -84,4 +94,6 @@ go run .
 - `POST /api/register` `{server, number, password}`;
 - `POST /api/call` `{number}`;
 - `POST /api/cancel`, `POST /api/answer`, `POST /api/decline`,
-  `POST /api/hangup`, `POST /api/unregister`.
+  `POST /api/hangup`, `POST /api/unregister`;
+- `GET /api/fs/tree?path=<rel>` — содержимое одного уровня каталога `-root`;
+- `GET /api/fs/file?path=<rel>` — текстовое содержимое файла (JSON).

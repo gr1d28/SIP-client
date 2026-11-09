@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -18,6 +19,7 @@ func main() {
 	webAddr := flag.String("web", ":8212", "web interface listen address")
 	sipAddr := flag.String("sip", "0.0.0.0:5060", "SIP UDP listen address")
 	advertiseIP := flag.String("ip", "", "IP advertised in Contact/Via (auto-detected towards the SIP server if empty)")
+	filesRoot := flag.String("root", ".", "directory exposed in the web file browser")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
@@ -28,6 +30,22 @@ func main() {
 	if os.Getenv("SIP_DEBUG") != "" { // full SIP message trace to stderr
 		sip.SIPDebug = true
 	}
+
+	root, err := filepath.Abs(*filesRoot)
+	if err == nil {
+		root, err = filepath.EvalSymlinks(root)
+	}
+	if err == nil {
+		var fi os.FileInfo
+		if fi, err = os.Stat(root); err == nil && !fi.IsDir() {
+			err = errors.New(root + " is not a directory")
+		}
+	}
+	if err != nil {
+		logger.Error("bad -root", "path", *filesRoot, "error", err)
+		os.Exit(1)
+	}
+	logger.Info("file browser root", "path", root)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -45,7 +63,7 @@ func main() {
 
 	httpSrv := &http.Server{
 		Addr:              *webAddr,
-		Handler:           phone.HTTPHandler(),
+		Handler:           phone.HTTPHandler(root),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	errCh := make(chan error, 1)

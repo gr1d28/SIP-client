@@ -15,7 +15,8 @@
     font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     display: flex; justify-content: center;
   }
-  .phone { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 16px; }
+  .phone { width: 100%; max-width: 860px; display: flex; flex-direction: column; gap: 16px; }
+  .phone > .card, .phone > h1 { max-width: 420px; width: 100%; align-self: center; }
   h1 { font-size: 20px; margin: 0; text-align: center; }
   h1 small { display:block; font-size: 12px; color: var(--muted); font-weight: normal; margin-top: 4px; }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
@@ -44,6 +45,30 @@
   .callline { font-size: 17px; margin: 4px 0 2px; }
   .duration { color: var(--muted); font-variant-numeric: tabular-nums; }
   .toast { min-height: 18px; font-size: 13px; color: var(--err); margin-top: 8px; }
+  .files { display: flex; gap: 16px; align-items: stretch; }
+  .files .tree-card { width: 300px; flex: none; min-width: 0; }
+  .files .prev-card { flex: 1; min-width: 0; }
+  @media (max-width: 720px) {
+    .files { flex-direction: column; }
+    .files .tree-card { width: 100%; }
+  }
+  .tree { max-height: 420px; overflow: auto; font-size: 14px; }
+  .tree ul { list-style: none; margin: 0; padding-left: 15px; }
+  .tree > ul { padding-left: 0; }
+  .tnode {
+    display: flex; gap: 6px; align-items: center; padding: 3px 6px;
+    border-radius: 6px; cursor: pointer; user-select: none; white-space: nowrap;
+  }
+  .tnode:hover { background: var(--bg); }
+  .tnode.sel { background: var(--accent); color: #fff; }
+  .tnode .mark { width: 11px; flex: none; text-align: center; font-size: 11px; color: var(--accent); }
+  .tree .muted { margin-top: 8px; }
+  pre.prev {
+    margin: 0; max-height: 420px; overflow: auto; background: var(--bg);
+    border: 1px solid var(--border); border-radius: 8px; padding: 12px;
+    font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; white-space: pre;
+    min-height: 44px;
+  }
 </style>
 </head>
 <body>
@@ -84,6 +109,18 @@
     <div class="row">
       <button id="btnRegister">Зарегистрировать</button>
       <button id="btnUnregister" class="neutral">Снять с регистрации</button>
+    </div>
+  </div>
+
+  <div class="files">
+    <div class="card tree-card">
+      <h2>Файлы</h2>
+      <div class="tree" id="tree"></div>
+    </div>
+    <div class="card prev-card">
+      <h2>Превью</h2>
+      <div class="muted" id="prevTitle">выберите файл в дереве</div>
+      <pre class="prev" id="prevPre"></pre>
     </div>
   </div>
 
@@ -191,6 +228,73 @@ $("btnAnswer").onclick    = () => action("/api/answer", {});
 $("btnDecline").onclick   = () => action("/api/decline", {});
 $("btnHangup").onclick    = () => action("/api/hangup", {});
 $("callee").addEventListener("keydown", e => { if (e.key === "Enter") $("btnCall").click(); });
+
+let fileSel = null;
+
+function treeRow(name, mark, cls) {
+  const row = document.createElement("div");
+  row.className = "tnode " + cls;
+  const m = document.createElement("span");
+  m.className = "mark";
+  m.textContent = mark;
+  const t = document.createElement("span");
+  t.textContent = name;
+  row.append(m, t);
+  return row;
+}
+
+async function buildTree(ul, path) {
+  let data;
+  try { data = await api("/api/fs/tree?path=" + encodeURIComponent(path)); }
+  catch (e) { toast("Файлы: " + e.message); return; }
+  ul.textContent = "";
+  for (const en of data.entries || []) {
+    const li = document.createElement("li");
+    if (en.dir) {
+      const row = treeRow(en.name, "▸", "dir");
+      const sub = document.createElement("ul");
+      sub.style.display = "none";
+      let loaded = false;
+      row.onclick = async () => {
+        const wasOpen = sub.style.display !== "none";
+        if (!wasOpen && !loaded) { await buildTree(sub, en.path); loaded = true; }
+        sub.style.display = wasOpen ? "none" : "";
+        row.firstChild.textContent = wasOpen ? "▸" : "▾";
+      };
+      li.append(row, sub);
+    } else {
+      const row = treeRow(en.name, "·", "file");
+      row.onclick = () => selectFile(en.path, row);
+      li.append(row);
+    }
+    ul.appendChild(li);
+  }
+  if (data.truncated) {
+    const note = document.createElement("div");
+    note.className = "muted";
+    note.textContent = "…список обрезан (слишком много записей)";
+    ul.appendChild(note);
+  }
+}
+
+async function selectFile(path, row) {
+  if (fileSel) fileSel.classList.remove("sel");
+  fileSel = row;
+  row.classList.add("sel");
+  $("prevPre").textContent = "";
+  $("prevTitle").textContent = path;
+  let f;
+  try { f = await api("/api/fs/file?path=" + encodeURIComponent(path)); }
+  catch (e) { toast(e.message); return; }
+  $("prevTitle").textContent = f.path + " · " + f.size + " Б";
+  $("prevPre").textContent = f.kind === "text" ? f.text
+    : f.kind === "too_large" ? "Файл слишком большой для превью (> 512 КиБ)"
+    : "Бинарный файл — превью недоступно";
+}
+
+const treeRoot = document.createElement("ul");
+$("tree").appendChild(treeRoot);
+buildTree(treeRoot, "");
 
 setInterval(poll, 800);
 setInterval(renderDuration, 1000);
